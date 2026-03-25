@@ -24,7 +24,7 @@ if 'word_data' not in st.session_state:
 if 'final_df' not in st.session_state:
     st.session_state.final_df = None
 
-# 區分身份的名單資料庫
+# --- 資料庫設定 ---
 TEAM_MEMBERS = [
     "丁秋吟", "王永慶", "王銓德", "王志文", "王家業", "朱家樺", "江旼珀", "吳上苑", "吳宜汶", "呂恩昕", 
     "呂淑惠", "李國誥", "李榮斌", "李穎裕", "阮智偉", "周昆佑", "周志暐", "周志祥", "林志嶸", "林永松", 
@@ -47,11 +47,9 @@ CONSULTANTS = [
     "林錦志", "林明忠", "張哲誠", "詹昆學", "陳彥宏", "許馨云", "張橋語"
 ]
 
-# 建立身份對照字典
 MEMBER_ROLES = {name: "隊員" for name in TEAM_MEMBERS}
 MEMBER_ROLES.update({name: "顧問" for name in CONSULTANTS})
 
-# 原始車隊人員名單 (含注音)
 RAW_MEMBERS = [
     "丁秋吟(ㄉㄑㄧ)", "王永慶(ㄨㄩㄑ)", "王銓德(ㄨㄑㄉ)", "王志文(ㄨㄓㄨ)", "王家業(ㄨㄐㄧ)", "朱家樺(ㄓㄐㄏ)", "江旼珀(ㄐㄇㄆ)", "吳上苑(ㄨㄕㄩ)", "吳宜汶(ㄨㄧㄨ)", "呂恩昕(ㄌㄣㄒ)", 
     "呂淑惠(ㄌㄕㄏ)", "李國誥(ㄌㄍㄍ)", "李榮斌(ㄌㄖㄅ)", "李穎裕(ㄌㄧㄩ)", "阮智偉(ㄖㄓㄨ)", "周昆佑(ㄓㄎㄧ)", "周志暐(ㄓㄓㄨ)", "周志祥(ㄓㄓㄒ)", "林志嶸(ㄌㄓㄖ)", "林永松(ㄌㄩㄙ)", 
@@ -70,9 +68,29 @@ RAW_MEMBERS = [
     "林錦志(ㄌㄐㄓ)", "林明忠(ㄌㄇㄓ)", "張哲誠(ㄓㄓㄔ)", "詹昆學(ㄓㄎㄒ)", "陳彥宏(ㄔㄧㄏ)", "許馨云(ㄒㄒㄩ)", "張橋語(ㄓㄑㄩ)"
 ]
 
-# 重新格式化：依注音首字排序
-ALL_MEMBERS_WITH_ZHUYIN = sorted([f"{m.split('(')[1][:-1]} - {m.split('(')[0]}" for m in RAW_MEMBERS])
-CLEAN_ALL_MEMBERS = [m.split('(')[0] for m in RAW_MEMBERS]
+# --- 多重排序演算法 ---
+def get_sort_key(raw_str):
+    """
+    第一順位：字首注音
+    第二順位：字首國字 (讓同字群聚)
+    第三順位：第二字注音
+    第四順位：第二字國字...以此類推
+    """
+    name, z = raw_str.split('(')
+    z = z.rstrip(')')
+    key = []
+    # 逐字比對注音與國字
+    for i in range(max(len(name), len(z))):
+        zy = z[i] if i < len(z) else ""
+        char = name[i] if i < len(name) else ""
+        key.extend([zy, char])
+    return tuple(key)
+
+# 執行排序並格式化
+RAW_MEMBERS_SORTED = sorted(RAW_MEMBERS, key=get_sort_key)
+# 下拉選單顯示格式：姓名 (注音) -> 確保打字能被搜尋到
+ALL_MEMBERS_FORMATTED = [f"{m.split('(')[0]} ({m.split('(')[1]}" for m in RAW_MEMBERS_SORTED]
+CLEAN_ALL_MEMBERS = [m.split('(')[0] for m in RAW_MEMBERS_SORTED]
 
 def generate_word_report(date_str, location_str, clean_attendees):
     doc = Document()
@@ -84,11 +102,9 @@ def generate_word_report(date_str, location_str, clean_attendees):
         
     doc.add_paragraph(f'本次參與總人數：{len(clean_attendees)} 人')
     
-    # 將人員分類為顧問與隊員
     attended_consultants = [name for name in clean_attendees if MEMBER_ROLES.get(name) == '顧問']
     attended_members = [name for name in clean_attendees if MEMBER_ROLES.get(name) == '隊員']
     
-    # 寫入 Word
     doc.add_heading('出席顧問：', level=2)
     doc.add_paragraph("、".join(attended_consultants) if attended_consultants else "無")
     
@@ -100,35 +116,43 @@ def generate_word_report(date_str, location_str, clean_attendees):
     return bio.getvalue()
 
 def auto_adjust_excel_columns(df):
-    """產出 Excel 並自動根據字元長度調整欄寬"""
+    """產出 Excel、自動調整欄寬、開啟篩選器並凍結窗格"""
     excel_buffer = BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='點名總表')
         worksheet = writer.sheets['點名總表']
         
+        # 1. 自動調整欄寬
         for col in worksheet.columns:
             max_length = 0
             column_letter = col[0].column_letter
             for cell in col:
                 try:
-                    # 中文字元較寬，利用 utf-8 編碼長度來模擬視覺寬度
                     cell_len = len(str(cell.value).encode('utf-8'))
                     if cell_len > max_length:
                         max_length = cell_len
                 except:
                     pass
-            # 加上一點緩衝空間 (乘以 1.1)
             worksheet.column_dimensions[column_letter].width = (max_length + 2) * 1.1
+            
+        # 2. 開啟全表篩選器 (包含「身份」欄位)
+        worksheet.auto_filter.ref = worksheet.dimensions
+        
+        # 3. 凍結首列與前三欄 (編號、身份、姓名)
+        worksheet.freeze_panes = 'D2'
             
     return excel_buffer.getvalue()
 
 # 選定人員即簽到的連動函數
 def on_person_select():
     selected = st.session_state.person_selector
-    if selected != "--- 請點擊此處輸入注音或選擇人員 ---" and selected not in st.session_state.attendees:
-        st.session_state.attendees.append(selected)
-        st.session_state.report_generated = False 
-    st.session_state.person_selector = "--- 請點擊此處輸入注音或選擇人員 ---"
+    if selected != "--- 請點選或輸入注音搜尋 ---":
+        # 簽到時，只擷取乾淨的姓名 (捨去括號與注音)
+        clean_name = selected.split(' (')[0]
+        if clean_name not in st.session_state.attendees:
+            st.session_state.attendees.append(clean_name)
+            st.session_state.report_generated = False 
+    st.session_state.person_selector = "--- 請點選或輸入注音搜尋 ---"
 
 st.title("🚴‍♂️ 車隊團騎點名系統")
 
@@ -149,7 +173,6 @@ if not st.session_state.setup_complete:
             temp_df = pd.read_excel(uploaded_file)
             st.success("✅ 舊表單載入成功！")
     else:
-        # 建立全新表單時，自帶「身份」欄位
         roles = [MEMBER_ROLES.get(m, "未知") for m in CLEAN_ALL_MEMBERS]
         temp_df = pd.DataFrame({"身份": roles, "姓名": CLEAN_ALL_MEMBERS})
         st.info("🆕 將建立全新表單。")
@@ -174,11 +197,11 @@ else:
     
     with col1:
         st.markdown("### 🔍 步驟三：快速簽到")
-        st.write("💡 直接打注音首字，選到名字瞬間即完成簽到。**已簽到的人員不會再出現在選單中。**")
+        st.write("💡 打注音首字搜尋，選定後即完成簽到並從選單隱藏。")
         
-        # 動態過濾：只顯示還沒簽到的人員
-        AVAILABLE_OPTIONS = ["--- 請點擊此處輸入注音或選擇人員 ---"] + [
-            m for m in ALL_MEMBERS_WITH_ZHUYIN if m not in st.session_state.attendees
+        # 動態過濾：只顯示還沒簽到的人員 (比對乾淨姓名)
+        AVAILABLE_OPTIONS = ["--- 請點選或輸入注音搜尋 ---"] + [
+            m for m in ALL_MEMBERS_FORMATTED if m.split(' (')[0] not in st.session_state.attendees
         ]
         
         st.selectbox(
@@ -190,6 +213,7 @@ else:
         
         st.markdown("---")
         st.markdown("#### 📝 修改/移除")
+        # 多選框現在只顯示乾淨的姓名，完全沒有注音
         updated_attendees = st.multiselect(
             "目前已簽到清單 (點擊 x 可移除誤點人員)：", 
             st.session_state.attendees, 
@@ -206,8 +230,7 @@ else:
         if not st.session_state.attendees:
             st.info("尚無人員簽到")
         else:
-            for i, person in enumerate(st.session_state.attendees):
-                clean_name = person.split(' - ')[1]
+            for i, clean_name in enumerate(st.session_state.attendees):
                 role = MEMBER_ROLES.get(clean_name, "")
                 st.write(f"**{i+1}.** {clean_name} ({role})")
 
@@ -229,7 +252,7 @@ else:
         elif event_col_name in df.columns and not df[df[event_col_name] == 'V'].empty:
             st.error(f"⚠️ {event_col_name} 已經有點名紀錄囉！")
         else:
-            clean_attendees = [p.split(' - ')[1] for p in st.session_state.attendees]
+            clean_attendees = st.session_state.attendees
             
             missing_members = [m for m in CLEAN_ALL_MEMBERS if m not in df['姓名'].values]
             if missing_members:
@@ -237,7 +260,6 @@ else:
                 new_rows = pd.DataFrame({"身份": new_roles, "姓名": missing_members})
                 df = pd.concat([df, new_rows], ignore_index=True)
 
-            # 確保 Excel 內有「身份」欄位 (防範舊表單漏缺)
             if '身份' not in df.columns:
                 df.insert(1, '身份', df['姓名'].map(MEMBER_ROLES).fillna('未知'))
 
@@ -251,7 +273,6 @@ else:
             if '總次數' in df.columns:
                 df = df.drop(columns=['總次數'])
 
-            # 重新排列欄位順序：編號 -> 身份 -> 姓名 -> 各日期 -> 總次數
             date_cols = [col for col in df.columns if col not in ['姓名', '身份', '編號', '總次數']]
             df['總次數'] = df[date_cols].apply(lambda x: (x == 'V').sum(), axis=1)
             
@@ -261,7 +282,6 @@ else:
             
             st.session_state.final_df = df
             
-            # 使用自訂的自動調整欄寬函數產出 Excel
             st.session_state.excel_data = auto_adjust_excel_columns(df)
             st.session_state.word_data = generate_word_report(date_str, location_str, clean_attendees)
             st.session_state.report_generated = True
