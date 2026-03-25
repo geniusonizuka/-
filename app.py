@@ -68,28 +68,39 @@ RAW_MEMBERS = [
     "林錦志(ㄌㄐㄓ)", "林明忠(ㄌㄇㄓ)", "張哲誠(ㄓㄓㄔ)", "詹昆學(ㄓㄎㄒ)", "陳彥宏(ㄔㄧㄏ)", "許馨云(ㄒㄒㄩ)", "張橋語(ㄓㄑㄩ)"
 ]
 
-# --- 多重排序演算法 ---
-def get_sort_key(raw_str):
+# --- 完美注音排序演算法 ---
+# 建立正確的注音符號順序字典 (解決電腦預設把 ㄧㄨㄩ 排在後面的 Bug)
+ZHUYIN_ORDER = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ"
+ZHUYIN_MAP = {char: str(index).zfill(2) for index, char in enumerate(ZHUYIN_ORDER)}
+
+def get_zhuyin_rank(char):
+    return ZHUYIN_MAP.get(char, "99")
+
+def custom_sort_key(item):
     """
     第一順位：字首注音
     第二順位：字首國字 (讓同字群聚)
     第三順位：第二字注音
     第四順位：第二字國字...以此類推
     """
-    name, z = raw_str.split('(')
-    z = z.rstrip(')')
-    key = []
-    # 逐字比對注音與國字
-    for i in range(max(len(name), len(z))):
-        zy = z[i] if i < len(z) else ""
-        char = name[i] if i < len(name) else ""
-        key.extend([zy, char])
-    return tuple(key)
+    name, zhuyin = item.split('(')
+    zhuyin = zhuyin.rstrip(')')
+    
+    # 補齊長度以防單名報錯
+    name_pad = (name + "   ")[:3]
+    zy_pad = (zhuyin + "   ")[:3]
+    
+    return (
+        get_zhuyin_rank(zy_pad[0]), name_pad[0],
+        get_zhuyin_rank(zy_pad[1]), name_pad[1],
+        get_zhuyin_rank(zy_pad[2]), name_pad[2]
+    )
 
-# 執行排序並格式化
-RAW_MEMBERS_SORTED = sorted(RAW_MEMBERS, key=get_sort_key)
-# 下拉選單顯示格式：姓名 (注音) -> 確保打字能被搜尋到
-ALL_MEMBERS_FORMATTED = [f"{m.split('(')[0]} ({m.split('(')[1]}" for m in RAW_MEMBERS_SORTED]
+# 執行嚴格排序
+RAW_MEMBERS_SORTED = sorted(RAW_MEMBERS, key=custom_sort_key)
+
+# 下拉選單顯示格式改為較乾淨的：姓名 [注音]
+ALL_MEMBERS_FORMATTED = [f"{m.split('(')[0]} [{m.split('(')[1][:-1]}]" for m in RAW_MEMBERS_SORTED]
 CLEAN_ALL_MEMBERS = [m.split('(')[0] for m in RAW_MEMBERS_SORTED]
 
 def generate_word_report(date_str, location_str, clean_attendees):
@@ -115,8 +126,10 @@ def generate_word_report(date_str, location_str, clean_attendees):
     doc.save(bio)
     return bio.getvalue()
 
+from openpyxl.utils import get_column_letter
+
 def auto_adjust_excel_columns(df):
-    """產出 Excel、自動調整欄寬、開啟篩選器並凍結窗格"""
+    """產出 Excel、自動調整欄寬、並精準開啟下拉篩選器"""
     excel_buffer = BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='點名總表')
@@ -135,8 +148,11 @@ def auto_adjust_excel_columns(df):
                     pass
             worksheet.column_dimensions[column_letter].width = (max_length + 2) * 1.1
             
-        # 2. 開啟全表篩選器 (包含「身份」欄位)
-        worksheet.auto_filter.ref = worksheet.dimensions
+        # 2. 精準設定全表篩選器 (這樣「總次數」跟「身份」絕對會有下拉選單)
+        max_row = worksheet.max_row
+        max_col = worksheet.max_column
+        col_letter = get_column_letter(max_col)
+        worksheet.auto_filter.ref = f"A1:{col_letter}{max_row}"
         
         # 3. 凍結首列與前三欄 (編號、身份、姓名)
         worksheet.freeze_panes = 'D2'
@@ -147,8 +163,8 @@ def auto_adjust_excel_columns(df):
 def on_person_select():
     selected = st.session_state.person_selector
     if selected != "--- 請點選或輸入注音搜尋 ---":
-        # 簽到時，只擷取乾淨的姓名 (捨去括號與注音)
-        clean_name = selected.split(' (')[0]
+        # 簽到瞬間，切掉中括號與注音，只留純淨姓名
+        clean_name = selected.split(' [')[0]
         if clean_name not in st.session_state.attendees:
             st.session_state.attendees.append(clean_name)
             st.session_state.report_generated = False 
@@ -199,9 +215,8 @@ else:
         st.markdown("### 🔍 步驟三：快速簽到")
         st.write("💡 打注音首字搜尋，選定後即完成簽到並從選單隱藏。")
         
-        # 動態過濾：只顯示還沒簽到的人員 (比對乾淨姓名)
         AVAILABLE_OPTIONS = ["--- 請點選或輸入注音搜尋 ---"] + [
-            m for m in ALL_MEMBERS_FORMATTED if m.split(' (')[0] not in st.session_state.attendees
+            m for m in ALL_MEMBERS_FORMATTED if m.split(' [')[0] not in st.session_state.attendees
         ]
         
         st.selectbox(
@@ -213,7 +228,6 @@ else:
         
         st.markdown("---")
         st.markdown("#### 📝 修改/移除")
-        # 多選框現在只顯示乾淨的姓名，完全沒有注音
         updated_attendees = st.multiselect(
             "目前已簽到清單 (點擊 x 可移除誤點人員)：", 
             st.session_state.attendees, 
