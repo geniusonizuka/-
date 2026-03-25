@@ -1,46 +1,62 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from docx import Document
 from io import BytesIO
 
-# --- 初始化防呆鎖定狀態 (Session State) ---
+# --- 初始化防呆與狀態 (Session State) ---
 if 'setup_complete' not in st.session_state:
     st.session_state.setup_complete = False
 if 'df' not in st.session_state:
     st.session_state.df = None
 if 'date_str' not in st.session_state:
-    st.session_state.date_str = datetime.today().strftime("%Y-%m-%d")
+    st.session_state.date_str = None
+if 'attendees' not in st.session_state:
+    st.session_state.attendees = [] # 儲存已簽到人員
 
-# 車隊人員名單
-ALL_MEMBERS = [
-    "丁秋吟", "王永慶", "王銓德", "王志文", "王家業", "朱家樺", "江旼珀", "吳上苑", "吳宜汶", "呂恩昕", 
-    "呂淑惠", "李國誥", "李榮斌", "李穎裕", "阮智偉", "周昆佑", "周志暐", "周志祥", "林志嶸", "林永松", 
-    "林志佳", "劉柔君", "林佳宏", "林國芳", "林婉茹", "林智偉", "林華盛", "林瑞華", "林瑞燿", "林嘉信", 
-    "邱保銘", "邱信培", "徐琮凱", "柯富強", "洪偉倫", "胡中興", "胡耀仁", "夏進通", "涂旻聖", "張進源", 
-    "張文男", "張世明", "張仕欣", "張正中", "張百江", "張孟哲", "張錦升", "張勝富", "張路雄", "張鈞銘", 
-    "張仕宗", "張聰捷", "梁善鈞", "郭政富", "陳文政", "陳仕明", "陳怡如", "陳瑜玲", "陳冠良", "陳春文", 
-    "陳敏訓", "陳盛宏", "陳進忠", "陳佳忠", "曾雅惠", "游正豪", "游育民", "游振和", "黃世政", "黃明興", 
-    "黃信隆", "黃冠霖", "黃堃珉", "黃賀進", "黃麗萍", "楊俊逸", "魏捷祥", "楊閔森", "廖崇凱", "廖竣傑", 
-    "廖致維", "熊致堯", "蔡芷纭", "蔡玉雯", "蔡榮峰", "鄭銘宗", "蕭大勛", "蕭鈺潔", "謝仁政", "魏志龍", 
-    "藍慧真", "詹獻睿", "詹孟杰", "曾舜麟", "謝明佑", "羅靜宜", "姜小平", "莊麗雪", "吳慧芳", "蔡瑞賓", 
-    "張上觀", "陳素貞", "吳建興", "呂昇印", "孟繁光", "林坤茂", "邱榮家", "徐偉欽", "鄭淵太", "張志州", 
-    "張富山", "陳珀升", "陳溪宗", "陳瑋楊", "曾明雄", "詹憲國", "廖宏輝", "廖翊均", "劉邦杰", "劉明煌", 
-    "蔡榮祥", "蔡榮華", "周智勤", "謝志忠", "涂欽耀", "張志仲", "蕭森巍", "張銀恭", "王正錄", "曾建勳", 
-    "黃智煒", "劉海森", "賴南君", "劉權漢", "游伊君", "陳勇志", "陳文田", "林秋雄", "賴永昌", "劉煉騰", 
-    "林錦志", "林明忠", "張哲誠", "詹昆學", "陳彥宏", "許馨云", "張橋語"
+# 車隊人員名單 (已加入注音首字母，方便單一注音快速搜尋)
+ALL_MEMBERS_WITH_ZHUYIN = [
+    "丁秋吟(ㄉㄑㄧ)", "王永慶(ㄨㄩㄑ)", "王銓德(ㄨㄑㄉ)", "王志文(ㄨㄓㄨ)", "王家業(ㄨㄐㄧ)", "朱家樺(ㄓㄐㄏ)", "江旼珀(ㄐㄇㄆ)", "吳上苑(ㄨㄕㄩ)", "吳宜汶(ㄨㄧㄨ)", "呂恩昕(ㄌㄣㄒ)", 
+    "呂淑惠(ㄌㄕㄏ)", "李國誥(ㄌㄍㄍ)", "李榮斌(ㄌㄖㄅ)", "李穎裕(ㄌㄧㄩ)", "阮智偉(ㄖㄓㄨ)", "周昆佑(ㄓㄎㄧ)", "周志暐(ㄓㄓㄨ)", "周志祥(ㄓㄓㄒ)", "林志嶸(ㄌㄓㄖ)", "林永松(ㄌㄩㄙ)", 
+    "林志佳(ㄌㄓㄐ)", "劉柔君(ㄌㄖㄐ)", "林佳宏(ㄌㄐㄏ)", "林國芳(ㄌㄍㄈ)", "林婉茹(ㄌㄨㄖ)", "林智偉(ㄌㄓㄨ)", "林華盛(ㄌㄏㄕ)", "林瑞華(ㄌㄖㄏ)", "林瑞燿(ㄌㄖㄧ)", "林嘉信(ㄌㄐㄒ)", 
+    "邱保銘(ㄑㄅㄇ)", "邱信培(ㄑㄒㄆ)", "徐琮凱(ㄒㄘㄎ)", "柯富強(ㄎㄈㄑ)", "洪偉倫(ㄏㄨㄌ)", "胡中興(ㄏㄓㄒ)", "胡耀仁(ㄏㄧㄖ)", "夏進通(ㄒㄐㄊ)", "涂旻聖(ㄊㄇㄕ)", "張進源(ㄓㄐㄩ)", 
+    "張文男(ㄓㄨㄋ)", "張世明(ㄓㄕㄇ)", "張仕欣(ㄓㄕㄒ)", "張正中(ㄓㄓㄓ)", "張百江(ㄓㄅㄐ)", "張孟哲(ㄓㄇㄓ)", "張錦升(ㄓㄐㄕ)", "張勝富(ㄓㄕㄈ)", "張路雄(ㄓㄌㄒ)", "張鈞銘(ㄓㄐㄇ)", 
+    "張仕宗(ㄓㄕㄗ)", "張聰捷(ㄓㄘㄐ)", "梁善鈞(ㄌㄕㄐ)", "郭政富(ㄍㄓㄈ)", "陳文政(ㄔㄨㄓ)", "陳仕明(ㄔㄕㄇ)", "陳怡如(ㄔㄧㄖ)", "陳瑜玲(ㄔㄩㄌ)", "陳冠良(ㄔㄍㄌ)", "陳春文(ㄔㄔㄨ)", 
+    "陳敏訓(ㄔㄇㄒ)", "陳盛宏(ㄔㄕㄏ)", "陳進忠(ㄔㄐㄓ)", "陳佳忠(ㄔㄐㄓ)", "曾雅惠(ㄗㄧㄏ)", "游正豪(ㄧㄓㄏ)", "游育民(ㄧㄩㄇ)", "游振和(ㄧㄓㄏ)", "黃世政(ㄏㄕㄓ)", "黃明興(ㄏㄇㄒ)", 
+    "黃信隆(ㄏㄒㄌ)", "黃冠霖(ㄏㄍㄌ)", "黃堃珉(ㄏㄎㄇ)", "黃賀進(ㄏㄏㄐ)", "黃麗萍(ㄏㄌㄆ)", "楊俊逸(ㄧㄐㄧ)", "魏捷祥(ㄨㄐㄒ)", "楊閔森(ㄧㄇㄙ)", "廖崇凱(ㄌㄔㄎ)", "廖竣傑(ㄌㄐㄐ)", 
+    "廖致維(ㄌㄓㄨ)", "熊致堯(ㄒㄓㄧ)", "蔡芷纭(ㄘㄓㄩ)", "蔡玉雯(ㄘㄩㄨ)", "蔡榮峰(ㄘㄖㄈ)", "鄭銘宗(ㄓㄇㄗ)", "蕭大勛(ㄒㄉㄒ)", "蕭鈺潔(ㄒㄩㄐ)", "謝仁政(ㄒㄖㄓ)", "魏志龍(ㄨㄓㄌ)", 
+    "藍慧真(ㄌㄏㄓ)", "詹獻睿(ㄓㄒㄖ)", "詹孟杰(ㄓㄇㄐ)", "曾舜麟(ㄗㄕㄌ)", "謝明佑(ㄒㄇㄧ)", "羅靜宜(ㄌㄐㄧ)", "姜小平(ㄐㄒㄆ)", "莊麗雪(ㄓㄌㄒ)", "吳慧芳(ㄨㄏㄈ)", "蔡瑞賓(ㄘㄖㄅ)", 
+    "張上觀(ㄓㄕㄍ)", "陳素貞(ㄔㄙㄓ)", "吳建興(ㄨㄐㄒ)", "呂昇印(ㄌㄕㄧ)", "孟繁光(ㄇㄈㄍ)", "林坤茂(ㄌㄎㄇ)", "邱榮家(ㄑㄖㄐ)", "徐偉欽(ㄒㄨㄑ)", "鄭淵太(ㄓㄩㄊ)", "張志州(ㄓㄓㄓ)", 
+    "張富山(ㄓㄈㄕ)", "陳珀升(ㄔㄆㄕ)", "陳溪宗(ㄔㄒㄗ)", "陳瑋楊(ㄔㄨㄧ)", "曾明雄(ㄗㄇㄒ)", "詹憲國(ㄓㄒㄍ)", "廖宏輝(ㄌㄏㄏ)", "廖翊均(ㄌㄧㄐ)", "劉邦杰(ㄌㄅㄐ)", "劉明煌(ㄌㄇㄏ)", 
+    "蔡榮祥(ㄘㄖㄒ)", "蔡榮華(ㄘㄖㄏ)", "周智勤(ㄓㄓㄑ)", "謝志忠(ㄒㄓㄓ)", "涂欽耀(ㄊㄑㄧ)", "張志仲(ㄓㄓㄓ)", "蕭森巍(ㄒㄙㄨ)", "張銀恭(ㄓㄧㄍ)", "王正錄(ㄨㄓㄌ)", "曾建勳(ㄗㄐㄒ)", 
+    "黃智煒(ㄏㄓㄨ)", "劉海森(ㄌㄏㄙ)", "賴南君(ㄌㄋㄐ)", "劉權漢(ㄌㄑㄏ)", "游伊君(ㄧㄧㄐ)", "陳勇志(ㄔㄩㄓ)", "陳文田(ㄔㄨㄊ)", "林秋雄(ㄌㄑㄒ)", "賴永昌(ㄌㄩㄔ)", "劉煉騰(ㄌㄌㄊ)", 
+    "林錦志(ㄌㄐㄓ)", "林明忠(ㄌㄇㄓ)", "張哲誠(ㄓㄓㄔ)", "詹昆學(ㄓㄎㄒ)", "陳彥宏(ㄔㄧㄏ)", "許馨云(ㄒㄒㄩ)", "張橋語(ㄓㄑㄩ)"
 ]
 
-def generate_word_report(date_str, attendees):
+# 原始乾淨名單 (用於對照與產生報表)
+CLEAN_ALL_MEMBERS = [name.split('(')[0] for name in ALL_MEMBERS_WITH_ZHUYIN]
+
+# 下拉選單的預設提示選項
+OPTIONS = ["--- 請點擊此處輸入注音或選擇人員 ---"] + ALL_MEMBERS_WITH_ZHUYIN
+
+def generate_word_report(date_str, clean_attendees):
     doc = Document()
     doc.add_heading('木工機械單車協會 - 團騎點名紀錄', 0)
     doc.add_heading(f'日期：{date_str}', level=1)
-    doc.add_paragraph(f'本次參與總人數：{len(attendees)} 人')
+    doc.add_paragraph(f'本次參與總人數：{len(clean_attendees)} 人')
     doc.add_heading('出席名單：', level=2)
-    doc.add_paragraph("、".join(attendees))
+    doc.add_paragraph("、".join(clean_attendees))
     bio = BytesIO()
     doc.save(bio)
     return bio.getvalue()
+
+# 選定人員即簽到的連動函數
+def on_person_select():
+    selected = st.session_state.person_selector
+    if selected != OPTIONS[0] and selected not in st.session_state.attendees:
+        st.session_state.attendees.append(selected)
+    # 簽到後瞬間將選單切換回預設提示文字
+    st.session_state.person_selector = OPTIONS[0]
 
 st.title("🚴‍♂️ 車隊團騎點名系統")
 
@@ -48,9 +64,12 @@ st.title("🚴‍♂️ 車隊團騎點名系統")
 # 階段一：設定畫面 (完成後會自動隱藏)
 # ==========================================
 if not st.session_state.setup_complete:
-    st.info("💡 請先完成下方設定。確認後介面會自動鎖定並隱藏，避免點名時誤觸。")
+    st.info("💡 請先完成下方設定。確認後介面會自動鎖定並進入點名模式。")
     
-    st.markdown("### 步驟一：載入資料")
+    st.markdown("### 步驟一：選擇點名日期")
+    selected_date = st.date_input("📅 點擊開啟月曆選擇：", datetime.today())
+    
+    st.markdown("### 步驟二：載入資料")
     mode = st.radio("請選擇資料載入方式：", ["上傳舊有總表接續點名", "建立全新總表"])
     
     temp_df = None
@@ -60,45 +79,82 @@ if not st.session_state.setup_complete:
             temp_df = pd.read_excel(uploaded_file)
             st.success("✅ 舊表單載入成功！")
     else:
-        temp_df = pd.DataFrame({"姓名": ALL_MEMBERS})
+        temp_df = pd.DataFrame({"姓名": CLEAN_ALL_MEMBERS})
         st.info("🆕 將建立全新表單。")
 
-    st.markdown("### 步驟二：確認點名日期")
-    date_options = [(datetime.today() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(-14, 15)]
-    selected_date = st.selectbox("📅 選擇團騎日期：", date_options, index=14)
-
-    # 鎖定按鈕
     if st.button("🔒 確認設定並開始點名"):
         if mode == "上傳舊有總表接續點名" and temp_df is None:
             st.warning("⚠️ 請先上傳檔案再繼續！")
         else:
             st.session_state.df = temp_df
-            st.session_state.date_str = selected_date
+            st.session_state.date_str = selected_date.strftime("%Y-%m-%d")
             st.session_state.setup_complete = True
-            st.rerun() # 重新整理畫面，進入點名模式
+            st.rerun() 
 
 # ==========================================
-# 階段二：點名主畫面 (設定完成後才會顯示)
+# 階段二：點名主畫面 (雙欄位設計)
 # ==========================================
 else:
     st.success(f"📌 目前鎖定點名日期：**{st.session_state.date_str}**")
     
-    st.markdown("### 步驟三：人員點名")
-    st.write("🎙️ **語音/注音快搜**：點擊下方框框，直接用手機鍵盤打注音，或按鍵盤上的「麥克風🎤」直接唸名字！")
+    # 建立左右兩欄 (手機畫面上會自動以上下排列呈現)
+    col1, col2 = st.columns([1.5, 1])
     
-    attendees = st.multiselect("✅ 請勾選今日出席人員：", ALL_MEMBERS)
+    with col1:
+        st.markdown("### 🔍 步驟三：快速簽到")
+        st.write("💡 直接打注音首字母 (如：打『ㄐ』找江、姜)，**選到名字的瞬間即完成簽到**。")
+        
+        # 搜尋框 (綁定連動函數)
+        st.selectbox(
+            "輸入注音或姓名關鍵字：", 
+            OPTIONS, 
+            key="person_selector", 
+            on_change=on_person_select
+        )
+        
+        st.markdown("---")
+        st.markdown("#### 📝 修改/移除")
+        st.write("如果有選錯人，可以在下方框框點擊該人員旁邊的『x』將其取消。")
+        updated_attendees = st.multiselect(
+            "目前已簽到清單 (供修改用)：", 
+            st.session_state.attendees, 
+            default=st.session_state.attendees,
+            label_visibility="collapsed"
+        )
+        # 如果使用者在多選框中按了 x，就更新清單
+        if updated_attendees != st.session_state.attendees:
+            st.session_state.attendees = updated_attendees
+            st.rerun()
+
+    with col2:
+        st.markdown("### 📋 即時簽到清單")
+        # 顯示乾淨的即時清單 (過濾掉注音符號)
+        if not st.session_state.attendees:
+            st.info("尚無人員簽到")
+        else:
+            for i, person in enumerate(st.session_state.attendees):
+                clean_name = person.split('(')[0]
+                st.write(f"**{i+1}.** {clean_name}")
+
+    st.markdown("---")
     
-    if st.button("💾 完成點名並產出報表"):
+    # ==========================================
+    # 產出報表區塊
+    # ==========================================
+    if st.button("💾 點名結束！產出並下載報表"):
         df = st.session_state.df
         date_str = st.session_state.date_str
         
-        if not attendees:
-            st.warning("⚠️ 請至少選擇一位出席人員！")
+        if not st.session_state.attendees:
+            st.warning("⚠️ 目前沒有任何人簽到！")
         elif date_str in df.columns and not df[df[date_str] == 'V'].empty:
             st.warning(f"⚠️ {date_str} 已經有點名紀錄囉！")
         else:
+            # 將簽到名單去除注音符號，轉換為乾淨姓名
+            clean_attendees = [p.split('(')[0] for p in st.session_state.attendees]
+            
             # 補齊新名單
-            missing_members = [m for m in ALL_MEMBERS if m not in df['姓名'].values]
+            missing_members = [m for m in CLEAN_ALL_MEMBERS if m not in df['姓名'].values]
             if missing_members:
                 new_rows = pd.DataFrame({"姓名": missing_members})
                 df = pd.concat([df, new_rows], ignore_index=True)
@@ -106,7 +162,7 @@ else:
             # 打 V
             if date_str not in df.columns:
                 df[date_str] = ""
-            for member in attendees:
+            for member in clean_attendees:
                 df.loc[df['姓名'] == member, date_str] = "V"
 
             # --- Excel 格式整理 ---
@@ -123,26 +179,23 @@ else:
             final_cols = ['編號', '姓名'] + date_cols + ['總次數']
             df = df[final_cols]
             
-            # 更新 Session 內的資料
             st.session_state.df = df
 
-            st.success(f"🎉 已成功記錄 {len(attendees)} 人！請務必下載下方檔案。")
+            st.success(f"🎉 已成功記錄 {len(clean_attendees)} 人！請下載下方檔案。")
 
             excel_buffer = BytesIO()
             df.to_excel(excel_buffer, index=False)
-            word_bytes = generate_word_report(date_str, attendees)
+            word_bytes = generate_word_report(date_str, clean_attendees)
 
-            col1, col2 = st.columns(2)
-            with col1:
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
                 st.download_button("📥 下載 Excel 總表", data=excel_buffer.getvalue(), file_name=f"車隊點名總表_{date_str}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            with col2:
+            with dl_col2:
                 st.download_button("📥 下載 Word 紀錄檔", data=word_bytes, file_name=f"{date_str}_團騎點名紀錄.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             
             st.write("📊 總表預覽：")
             st.dataframe(df)
 
-    # 提供解除鎖定的後門
-    st.markdown("---")
-    if st.button("⚙️ 修改日期或重新載入表單"):
+    if st.button("⚙️ 重新設定日期或表單"):
         st.session_state.setup_complete = False
         st.rerun()
