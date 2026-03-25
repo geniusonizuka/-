@@ -4,7 +4,15 @@ from datetime import datetime, timedelta
 from docx import Document
 from io import BytesIO
 
-# 車隊人員名單 (隊員與顧問)
+# --- 初始化防呆鎖定狀態 (Session State) ---
+if 'setup_complete' not in st.session_state:
+    st.session_state.setup_complete = False
+if 'df' not in st.session_state:
+    st.session_state.df = None
+if 'date_str' not in st.session_state:
+    st.session_state.date_str = datetime.today().strftime("%Y-%m-%d")
+
+# 車隊人員名單
 ALL_MEMBERS = [
     "丁秋吟", "王永慶", "王銓德", "王志文", "王家業", "朱家樺", "江旼珀", "吳上苑", "吳宜汶", "呂恩昕", 
     "呂淑惠", "李國誥", "李榮斌", "李穎裕", "阮智偉", "周昆佑", "周志暐", "周志祥", "林志嶸", "林永松", 
@@ -36,93 +44,105 @@ def generate_word_report(date_str, attendees):
 
 st.title("🚴‍♂️ 車隊團騎點名系統")
 
-# 1. 步驟一：改為下拉選單選擇模式
-st.markdown("### 步驟一：載入資料")
-mode = st.selectbox("請選擇資料載入方式：", ["上傳舊有總表接續點名", "建立全新總表"])
-
-df = None
-if mode == "上傳舊有總表接續點名":
-    uploaded_file = st.file_uploader("📂 選擇先前的 Excel 總表", type=["xlsx"])
-    if uploaded_file is not None:
-        df = pd.read_excel(uploaded_file)
-        st.success("✅ 舊表單載入成功！")
-else:
-    df = pd.DataFrame({"姓名": ALL_MEMBERS})
-    st.info("🆕 目前為全新表單。")
-
-# 2. 步驟二：日期改為下拉選單，並優化人員選取
-st.markdown("### 步驟二：今日點名")
-# 產生前後14天的日期供下拉選擇，預設為今天
-date_options = [(datetime.today() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(-14, 15)]
-date_str = st.selectbox("📅 選擇團騎日期：", date_options, index=14)
-
-st.write("💡 **小提示**：點擊下方框框後，可使用手機鍵盤的「麥克風」語音輸入，或打出注音/拼音關鍵字快速找人。")
-attendees = st.multiselect("✅ 請勾選今日出席人員：", ALL_MEMBERS)
-
-# 3. 執行點名與報表格式化
-if st.button("💾 完成點名並產出報表"):
-    if df is None and mode == "上傳舊有總表接續點名":
-        st.warning("⚠️ 請先上傳舊有的 Excel 表單，或將步驟一改為「建立全新總表」。")
-    elif not attendees:
-        st.warning("⚠️ 請至少選擇一位出席人員！")
-    elif date_str in df.columns and not df[df[date_str] == 'V'].empty:
-        st.warning(f"⚠️ {date_str} 已經有點名紀錄囉，請確認日期是否正確。")
+# ==========================================
+# 階段一：設定畫面 (完成後會自動隱藏)
+# ==========================================
+if not st.session_state.setup_complete:
+    st.info("💡 請先完成下方設定。確認後介面會自動鎖定並隱藏，避免點名時誤觸。")
+    
+    st.markdown("### 步驟一：載入資料")
+    mode = st.radio("請選擇資料載入方式：", ["上傳舊有總表接續點名", "建立全新總表"])
+    
+    temp_df = None
+    if mode == "上傳舊有總表接續點名":
+        uploaded_file = st.file_uploader("📂 選擇先前的 Excel 總表", type=["xlsx"])
+        if uploaded_file is not None:
+            temp_df = pd.read_excel(uploaded_file)
+            st.success("✅ 舊表單載入成功！")
     else:
-        # 補齊可能遺漏的新名單
-        missing_members = [m for m in ALL_MEMBERS if m not in df['姓名'].values]
-        if missing_members:
-            new_rows = pd.DataFrame({"姓名": missing_members})
-            df = pd.concat([df, new_rows], ignore_index=True)
+        temp_df = pd.DataFrame({"姓名": ALL_MEMBERS})
+        st.info("🆕 將建立全新表單。")
 
-        # 標記當日出席 (打 V)
-        if date_str not in df.columns:
-            df[date_str] = ""
-        for member in attendees:
-            df.loc[df['姓名'] == member, date_str] = "V"
+    st.markdown("### 步驟二：確認點名日期")
+    date_options = [(datetime.today() + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(-14, 15)]
+    selected_date = st.selectbox("📅 選擇團騎日期：", date_options, index=14)
 
-        # --- 開始整理 Excel 格式 ---
+    # 鎖定按鈕
+    if st.button("🔒 確認設定並開始點名"):
+        if mode == "上傳舊有總表接續點名" and temp_df is None:
+            st.warning("⚠️ 請先上傳檔案再繼續！")
+        else:
+            st.session_state.df = temp_df
+            st.session_state.date_str = selected_date
+            st.session_state.setup_complete = True
+            st.rerun() # 重新整理畫面，進入點名模式
+
+# ==========================================
+# 階段二：點名主畫面 (設定完成後才會顯示)
+# ==========================================
+else:
+    st.success(f"📌 目前鎖定點名日期：**{st.session_state.date_str}**")
+    
+    st.markdown("### 步驟三：人員點名")
+    st.write("🎙️ **語音/注音快搜**：點擊下方框框，直接用手機鍵盤打注音，或按鍵盤上的「麥克風🎤」直接唸名字！")
+    
+    attendees = st.multiselect("✅ 請勾選今日出席人員：", ALL_MEMBERS)
+    
+    if st.button("💾 完成點名並產出報表"):
+        df = st.session_state.df
+        date_str = st.session_state.date_str
         
-        # 1. 清理舊有的「編號」與「總次數」，準備重新計算與排列
-        if '編號' in df.columns:
-            df = df.drop(columns=['編號'])
-        if '總次數' in df.columns:
-            df = df.drop(columns=['總次數'])
+        if not attendees:
+            st.warning("⚠️ 請至少選擇一位出席人員！")
+        elif date_str in df.columns and not df[df[date_str] == 'V'].empty:
+            st.warning(f"⚠️ {date_str} 已經有點名紀錄囉！")
+        else:
+            # 補齊新名單
+            missing_members = [m for m in ALL_MEMBERS if m not in df['姓名'].values]
+            if missing_members:
+                new_rows = pd.DataFrame({"姓名": missing_members})
+                df = pd.concat([df, new_rows], ignore_index=True)
 
-        # 2. 計算總次數 (掃描扣除姓名後的所有日期欄位)
-        date_cols = [col for col in df.columns if col != '姓名']
-        df['總次數'] = df[date_cols].apply(lambda x: (x == 'V').sum(), axis=1)
+            # 打 V
+            if date_str not in df.columns:
+                df[date_str] = ""
+            for member in attendees:
+                df.loc[df['姓名'] == member, date_str] = "V"
 
-        # 3. 在最前方加入依序的「編號」 (第一欄)
-        df.insert(0, '編號', range(1, len(df) + 1))
+            # --- Excel 格式整理 ---
+            if '編號' in df.columns:
+                df = df.drop(columns=['編號'])
+            if '總次數' in df.columns:
+                df = df.drop(columns=['總次數'])
 
-        # 4. 重新排列欄位，確保「總次數」永遠在最後一欄
-        final_cols = ['編號', '姓名'] + date_cols + ['總次數']
-        df = df[final_cols]
-        
-        # --- 整理結束 ---
+            date_cols = [col for col in df.columns if col != '姓名']
+            df['總次數'] = df[date_cols].apply(lambda x: (x == 'V').sum(), axis=1)
 
-        st.success(f"🎉 已成功記錄 {len(attendees)} 人！請務必下載下方更新後的檔案。")
+            # 加入依序編號
+            df.insert(0, '編號', range(1, len(df) + 1))
+            final_cols = ['編號', '姓名'] + date_cols + ['總次數']
+            df = df[final_cols]
+            
+            # 更新 Session 內的資料
+            st.session_state.df = df
 
-        excel_buffer = BytesIO()
-        df.to_excel(excel_buffer, index=False)
-        word_bytes = generate_word_report(date_str, attendees)
+            st.success(f"🎉 已成功記錄 {len(attendees)} 人！請務必下載下方檔案。")
 
-        st.markdown("### 步驟三：下載今日檔案")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button(
-                label="📥 下載更新後的 Excel 總表",
-                data=excel_buffer.getvalue(),
-                file_name=f"車隊點名總表_{date_str}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        with col2:
-            st.download_button(
-                label="📥 下載當日 Word 紀錄檔",
-                data=word_bytes,
-                file_name=f"{date_str}_團騎點名紀錄.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-        
-        st.write("📊 目前總表預覽：")
-        st.dataframe(df)
+            excel_buffer = BytesIO()
+            df.to_excel(excel_buffer, index=False)
+            word_bytes = generate_word_report(date_str, attendees)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button("📥 下載 Excel 總表", data=excel_buffer.getvalue(), file_name=f"車隊點名總表_{date_str}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            with col2:
+                st.download_button("📥 下載 Word 紀錄檔", data=word_bytes, file_name=f"{date_str}_團騎點名紀錄.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            
+            st.write("📊 總表預覽：")
+            st.dataframe(df)
+
+    # 提供解除鎖定的後門
+    st.markdown("---")
+    if st.button("⚙️ 修改日期或重新載入表單"):
+        st.session_state.setup_complete = False
+        st.rerun()
