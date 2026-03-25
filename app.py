@@ -14,7 +14,7 @@ if 'date_str' not in st.session_state:
 if 'location' not in st.session_state:
     st.session_state.location = ""
 if 'attendees' not in st.session_state:
-    st.session_state.attendees = [] # 儲存已簽到人員
+    st.session_state.attendees = [] 
 if 'report_generated' not in st.session_state:
     st.session_state.report_generated = False 
 if 'excel_data' not in st.session_state:
@@ -23,6 +23,33 @@ if 'word_data' not in st.session_state:
     st.session_state.word_data = None
 if 'final_df' not in st.session_state:
     st.session_state.final_df = None
+
+# 區分身份的名單資料庫
+TEAM_MEMBERS = [
+    "丁秋吟", "王永慶", "王銓德", "王志文", "王家業", "朱家樺", "江旼珀", "吳上苑", "吳宜汶", "呂恩昕", 
+    "呂淑惠", "李國誥", "李榮斌", "李穎裕", "阮智偉", "周昆佑", "周志暐", "周志祥", "林志嶸", "林永松", 
+    "林志佳", "劉柔君", "林佳宏", "林國芳", "林婉茹", "林智偉", "林華盛", "林瑞華", "林瑞燿", "林嘉信", 
+    "邱保銘", "邱信培", "徐琮凱", "柯富強", "洪偉倫", "胡中興", "胡耀仁", "夏進通", "涂旻聖", "張進源", 
+    "張文男", "張世明", "張仕欣", "張正中", "張百江", "張孟哲", "張錦升", "張勝富", "張路雄", "張鈞銘", 
+    "張仕宗", "張聰捷", "梁善鈞", "郭政富", "陳文政", "陳仕明", "陳怡如", "陳瑜玲", "陳冠良", "陳春文", 
+    "陳敏訓", "陳盛宏", "陳進忠", "陳佳忠", "曾雅惠", "游正豪", "游育民", "游振和", "黃世政", "黃明興", 
+    "黃信隆", "黃冠霖", "黃堃珉", "黃賀進", "黃麗萍", "楊俊逸", "魏捷祥", "楊閔森", "廖崇凱", "廖竣傑", 
+    "廖致維", "熊致堯", "蔡芷纭", "蔡玉雯", "蔡榮峰", "鄭銘宗", "蕭大勛", "蕭鈺潔", "謝仁政", "魏志龍", 
+    "藍慧真", "詹獻睿", "詹孟杰", "曾舜麟", "謝明佑", "羅靜宜", "姜小平", "莊麗雪", "吳慧芳", "蔡瑞賓", 
+    "張上觀", "陳素貞"
+]
+
+CONSULTANTS = [
+    "吳建興", "呂昇印", "孟繁光", "林坤茂", "邱榮家", "徐偉欽", "鄭淵太", "張志州", 
+    "張富山", "陳珀升", "陳溪宗", "陳瑋楊", "曾明雄", "詹憲國", "廖宏輝", "廖翊均", "劉邦杰", "劉明煌", 
+    "蔡榮祥", "蔡榮華", "周智勤", "謝志忠", "涂欽耀", "張志仲", "蕭森巍", "張銀恭", "王正錄", "曾建勳", 
+    "黃智煒", "劉海森", "賴南君", "劉權漢", "游伊君", "陳勇志", "陳文田", "林秋雄", "賴永昌", "劉煉騰", 
+    "林錦志", "林明忠", "張哲誠", "詹昆學", "陳彥宏", "許馨云", "張橋語"
+]
+
+# 建立身份對照字典
+MEMBER_ROLES = {name: "隊員" for name in TEAM_MEMBERS}
+MEMBER_ROLES.update({name: "顧問" for name in CONSULTANTS})
 
 # 原始車隊人員名單 (含注音)
 RAW_MEMBERS = [
@@ -43,50 +70,73 @@ RAW_MEMBERS = [
     "林錦志(ㄌㄐㄓ)", "林明忠(ㄌㄇㄓ)", "張哲誠(ㄓㄓㄔ)", "詹昆學(ㄓㄎㄒ)", "陳彥宏(ㄔㄧㄏ)", "許馨云(ㄒㄒㄩ)", "張橋語(ㄓㄑㄩ)"
 ]
 
-# 重新格式化：依注音首字排序，確保相同首字的群聚在一起，並依照第二注音排序
+# 重新格式化：依注音首字排序
 ALL_MEMBERS_WITH_ZHUYIN = sorted([f"{m.split('(')[1][:-1]} - {m.split('(')[0]}" for m in RAW_MEMBERS])
-
-# 乾淨的原始名單 (供產出報表用)
 CLEAN_ALL_MEMBERS = [m.split('(')[0] for m in RAW_MEMBERS]
-
-OPTIONS = ["--- 請點擊此處輸入注音或選擇人員 ---"] + ALL_MEMBERS_WITH_ZHUYIN
 
 def generate_word_report(date_str, location_str, clean_attendees):
     doc = Document()
     doc.add_heading('木工機械單車協會 - 團騎點名紀錄', 0)
     doc.add_heading(f'日期：{date_str}', level=1)
     
-    # 若有輸入地點，則將地點顯示在 Word 檔的標題下方
     if location_str:
         doc.add_heading(f'地點：{location_str}', level=2)
         
     doc.add_paragraph(f'本次參與總人數：{len(clean_attendees)} 人')
-    doc.add_heading('出席名單：', level=2)
-    doc.add_paragraph("、".join(clean_attendees))
+    
+    # 將人員分類為顧問與隊員
+    attended_consultants = [name for name in clean_attendees if MEMBER_ROLES.get(name) == '顧問']
+    attended_members = [name for name in clean_attendees if MEMBER_ROLES.get(name) == '隊員']
+    
+    # 寫入 Word
+    doc.add_heading('出席顧問：', level=2)
+    doc.add_paragraph("、".join(attended_consultants) if attended_consultants else "無")
+    
+    doc.add_heading('出席隊員：', level=2)
+    doc.add_paragraph("、".join(attended_members) if attended_members else "無")
+    
     bio = BytesIO()
     doc.save(bio)
     return bio.getvalue()
 
+def auto_adjust_excel_columns(df):
+    """產出 Excel 並自動根據字元長度調整欄寬"""
+    excel_buffer = BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='點名總表')
+        worksheet = writer.sheets['點名總表']
+        
+        for col in worksheet.columns:
+            max_length = 0
+            column_letter = col[0].column_letter
+            for cell in col:
+                try:
+                    # 中文字元較寬，利用 utf-8 編碼長度來模擬視覺寬度
+                    cell_len = len(str(cell.value).encode('utf-8'))
+                    if cell_len > max_length:
+                        max_length = cell_len
+                except:
+                    pass
+            # 加上一點緩衝空間 (乘以 1.1)
+            worksheet.column_dimensions[column_letter].width = (max_length + 2) * 1.1
+            
+    return excel_buffer.getvalue()
+
 # 選定人員即簽到的連動函數
 def on_person_select():
     selected = st.session_state.person_selector
-    if selected != OPTIONS[0] and selected not in st.session_state.attendees:
+    if selected != "--- 請點擊此處輸入注音或選擇人員 ---" and selected not in st.session_state.attendees:
         st.session_state.attendees.append(selected)
-        st.session_state.report_generated = False # 有新人簽到，強制重新結算報表
-    # 簽到後瞬間將選單切換回預設提示文字
-    st.session_state.person_selector = OPTIONS[0]
+        st.session_state.report_generated = False 
+    st.session_state.person_selector = "--- 請點擊此處輸入注音或選擇人員 ---"
 
 st.title("🚴‍♂️ 車隊團騎點名系統")
 
-# ==========================================
-# 階段一：設定畫面 (完成後會自動隱藏)
-# ==========================================
 if not st.session_state.setup_complete:
     st.info("💡 請先完成下方設定。確認後介面會自動鎖定並進入點名模式。")
     
     st.markdown("### 步驟一：填寫活動資訊")
     selected_date = st.date_input("📅 點擊開啟月曆選擇日期：", datetime.today())
-    # 新增地點輸入框
     event_location = st.text_input("📍 輸入本次團騎地點 (例如：鳳凰山、136縣道...)")
     
     st.markdown("### 步驟二：載入資料")
@@ -99,7 +149,9 @@ if not st.session_state.setup_complete:
             temp_df = pd.read_excel(uploaded_file)
             st.success("✅ 舊表單載入成功！")
     else:
-        temp_df = pd.DataFrame({"姓名": CLEAN_ALL_MEMBERS})
+        # 建立全新表單時，自帶「身份」欄位
+        roles = [MEMBER_ROLES.get(m, "未知") for m in CLEAN_ALL_MEMBERS]
+        temp_df = pd.DataFrame({"身份": roles, "姓名": CLEAN_ALL_MEMBERS})
         st.info("🆕 將建立全新表單。")
 
     if st.button("🔒 確認設定並開始點名"):
@@ -112,11 +164,7 @@ if not st.session_state.setup_complete:
             st.session_state.setup_complete = True
             st.rerun() 
 
-# ==========================================
-# 階段二：點名主畫面 (雙欄位設計)
-# ==========================================
 else:
-    # 顯示目前鎖定的日期與地點
     display_event = st.session_state.date_str
     if st.session_state.location:
         display_event += f" ({st.session_state.location})"
@@ -126,11 +174,16 @@ else:
     
     with col1:
         st.markdown("### 🔍 步驟三：快速簽到")
-        st.write("💡 直接打注音首字 (如：打『ㄊ』優先找涂)，選到名字瞬間即完成簽到。")
+        st.write("💡 直接打注音首字，選到名字瞬間即完成簽到。**已簽到的人員不會再出現在選單中。**")
+        
+        # 動態過濾：只顯示還沒簽到的人員
+        AVAILABLE_OPTIONS = ["--- 請點擊此處輸入注音或選擇人員 ---"] + [
+            m for m in ALL_MEMBERS_WITH_ZHUYIN if m not in st.session_state.attendees
+        ]
         
         st.selectbox(
             "輸入注音或姓名關鍵字：", 
-            OPTIONS, 
+            AVAILABLE_OPTIONS, 
             key="person_selector", 
             on_change=on_person_select
         )
@@ -155,13 +208,11 @@ else:
         else:
             for i, person in enumerate(st.session_state.attendees):
                 clean_name = person.split(' - ')[1]
-                st.write(f"**{i+1}.** {clean_name}")
+                role = MEMBER_ROLES.get(clean_name, "")
+                st.write(f"**{i+1}.** {clean_name} ({role})")
 
     st.markdown("---")
     
-    # ==========================================
-    # 產出報表區塊 (按鈕推至右下角)
-    # ==========================================
     col_empty1, col_empty2, col_btn = st.columns([2, 1, 2])
     with col_btn:
         finish_btn = st.button("💾 點名結束！", use_container_width=True)
@@ -171,7 +222,6 @@ else:
         date_str = st.session_state.date_str
         location_str = st.session_state.location
         
-        # 將日期與地點組合，做為 Excel 欄位名稱
         event_col_name = f"{date_str} {location_str}".strip()
         
         if not st.session_state.attendees:
@@ -183,8 +233,13 @@ else:
             
             missing_members = [m for m in CLEAN_ALL_MEMBERS if m not in df['姓名'].values]
             if missing_members:
-                new_rows = pd.DataFrame({"姓名": missing_members})
+                new_roles = [MEMBER_ROLES.get(m, "未知") for m in missing_members]
+                new_rows = pd.DataFrame({"身份": new_roles, "姓名": missing_members})
                 df = pd.concat([df, new_rows], ignore_index=True)
+
+            # 確保 Excel 內有「身份」欄位 (防範舊表單漏缺)
+            if '身份' not in df.columns:
+                df.insert(1, '身份', df['姓名'].map(MEMBER_ROLES).fillna('未知'))
 
             if event_col_name not in df.columns:
                 df[event_col_name] = ""
@@ -196,26 +251,24 @@ else:
             if '總次數' in df.columns:
                 df = df.drop(columns=['總次數'])
 
-            date_cols = [col for col in df.columns if col != '姓名']
+            # 重新排列欄位順序：編號 -> 身份 -> 姓名 -> 各日期 -> 總次數
+            date_cols = [col for col in df.columns if col not in ['姓名', '身份', '編號', '總次數']]
             df['總次數'] = df[date_cols].apply(lambda x: (x == 'V').sum(), axis=1)
-
+            
             df.insert(0, '編號', range(1, len(df) + 1))
-            final_cols = ['編號', '姓名'] + date_cols + ['總次數']
+            final_cols = ['編號', '身份', '姓名'] + date_cols + ['總次數']
             df = df[final_cols]
             
             st.session_state.final_df = df
             
-            excel_buffer = BytesIO()
-            df.to_excel(excel_buffer, index=False)
-            st.session_state.excel_data = excel_buffer.getvalue()
-            
+            # 使用自訂的自動調整欄寬函數產出 Excel
+            st.session_state.excel_data = auto_adjust_excel_columns(df)
             st.session_state.word_data = generate_word_report(date_str, location_str, clean_attendees)
             st.session_state.report_generated = True
 
     if st.session_state.report_generated:
         st.success(f"🎉 已成功記錄 {len(st.session_state.attendees)} 人！您可以隨時點擊下方按鈕下載檔案。")
 
-        # 輸出檔案名稱也加上地點，方便日後整理
         file_name_suffix = st.session_state.date_str
         if st.session_state.location:
              file_name_suffix += f"_{st.session_state.location}"
