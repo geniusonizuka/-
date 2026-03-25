@@ -13,9 +13,17 @@ if 'date_str' not in st.session_state:
     st.session_state.date_str = None
 if 'attendees' not in st.session_state:
     st.session_state.attendees = [] # 儲存已簽到人員
+if 'report_generated' not in st.session_state:
+    st.session_state.report_generated = False # 記錄是否已產出報表
+if 'excel_data' not in st.session_state:
+    st.session_state.excel_data = None
+if 'word_data' not in st.session_state:
+    st.session_state.word_data = None
+if 'final_df' not in st.session_state:
+    st.session_state.final_df = None
 
-# 車隊人員名單 (已加入注音首字母，方便單一注音快速搜尋)
-ALL_MEMBERS_WITH_ZHUYIN = [
+# 原始車隊人員名單 (含注音)
+RAW_MEMBERS = [
     "丁秋吟(ㄉㄑㄧ)", "王永慶(ㄨㄩㄑ)", "王銓德(ㄨㄑㄉ)", "王志文(ㄨㄓㄨ)", "王家業(ㄨㄐㄧ)", "朱家樺(ㄓㄐㄏ)", "江旼珀(ㄐㄇㄆ)", "吳上苑(ㄨㄕㄩ)", "吳宜汶(ㄨㄧㄨ)", "呂恩昕(ㄌㄣㄒ)", 
     "呂淑惠(ㄌㄕㄏ)", "李國誥(ㄌㄍㄍ)", "李榮斌(ㄌㄖㄅ)", "李穎裕(ㄌㄧㄩ)", "阮智偉(ㄖㄓㄨ)", "周昆佑(ㄓㄎㄧ)", "周志暐(ㄓㄓㄨ)", "周志祥(ㄓㄓㄒ)", "林志嶸(ㄌㄓㄖ)", "林永松(ㄌㄩㄙ)", 
     "林志佳(ㄌㄓㄐ)", "劉柔君(ㄌㄖㄐ)", "林佳宏(ㄌㄐㄏ)", "林國芳(ㄌㄍㄈ)", "林婉茹(ㄌㄨㄖ)", "林智偉(ㄌㄓㄨ)", "林華盛(ㄌㄏㄕ)", "林瑞華(ㄌㄖㄏ)", "林瑞燿(ㄌㄖㄧ)", "林嘉信(ㄌㄐㄒ)", 
@@ -33,8 +41,10 @@ ALL_MEMBERS_WITH_ZHUYIN = [
     "林錦志(ㄌㄐㄓ)", "林明忠(ㄌㄇㄓ)", "張哲誠(ㄓㄓㄔ)", "詹昆學(ㄓㄎㄒ)", "陳彥宏(ㄔㄧㄏ)", "許馨云(ㄒㄒㄩ)", "張橋語(ㄓㄑㄩ)"
 ]
 
-# 原始乾淨名單 (用於對照與產生報表)
-CLEAN_ALL_MEMBERS = [name.split('(')[0] for name in ALL_MEMBERS_WITH_ZHUYIN]
+# 重新格式化：將注音拉到最前面，並照注音排序 (讓首字搜尋最精準)
+ALL_MEMBERS_WITH_ZHUYIN = sorted([f"{m.split('(')[1][:-1]} - {m.split('(')[0]}" for m in RAW_MEMBERS])
+# 乾淨的原始名單 (供產出報表用)
+CLEAN_ALL_MEMBERS = [m.split('(')[0] for m in RAW_MEMBERS]
 
 # 下拉選單的預設提示選項
 OPTIONS = ["--- 請點擊此處輸入注音或選擇人員 ---"] + ALL_MEMBERS_WITH_ZHUYIN
@@ -55,6 +65,7 @@ def on_person_select():
     selected = st.session_state.person_selector
     if selected != OPTIONS[0] and selected not in st.session_state.attendees:
         st.session_state.attendees.append(selected)
+        st.session_state.report_generated = False # 只要有新的人簽到，就隱藏舊報表，強制重新結算
     # 簽到後瞬間將選單切換回預設提示文字
     st.session_state.person_selector = OPTIONS[0]
 
@@ -97,14 +108,12 @@ if not st.session_state.setup_complete:
 else:
     st.success(f"📌 目前鎖定點名日期：**{st.session_state.date_str}**")
     
-    # 建立左右兩欄 (手機畫面上會自動以上下排列呈現)
     col1, col2 = st.columns([1.5, 1])
     
     with col1:
         st.markdown("### 🔍 步驟三：快速簽到")
-        st.write("💡 直接打注音首字母 (如：打『ㄐ』找江、姜)，**選到名字的瞬間即完成簽到**。")
+        st.write("💡 直接打注音首字 (如：打『ㄊ』優先找涂)，選到名字瞬間即完成簽到。")
         
-        # 搜尋框 (綁定連動函數)
         st.selectbox(
             "輸入注音或姓名關鍵字：", 
             OPTIONS, 
@@ -114,58 +123,61 @@ else:
         
         st.markdown("---")
         st.markdown("#### 📝 修改/移除")
-        st.write("如果有選錯人，可以在下方框框點擊該人員旁邊的『x』將其取消。")
         updated_attendees = st.multiselect(
-            "目前已簽到清單 (供修改用)：", 
+            "目前已簽到清單 (點擊 x 可移除誤點人員)：", 
             st.session_state.attendees, 
             default=st.session_state.attendees,
             label_visibility="collapsed"
         )
-        # 如果使用者在多選框中按了 x，就更新清單
+        # 如果使用者移除了某人，更新清單並隱藏報表
         if updated_attendees != st.session_state.attendees:
             st.session_state.attendees = updated_attendees
+            st.session_state.report_generated = False
             st.rerun()
 
     with col2:
         st.markdown("### 📋 即時簽到清單")
-        # 顯示乾淨的即時清單 (過濾掉注音符號)
         if not st.session_state.attendees:
             st.info("尚無人員簽到")
         else:
             for i, person in enumerate(st.session_state.attendees):
-                clean_name = person.split('(')[0]
+                # 只擷取 " - " 後面的乾淨姓名來顯示
+                clean_name = person.split(' - ')[1]
                 st.write(f"**{i+1}.** {clean_name}")
 
     st.markdown("---")
     
     # ==========================================
-    # 產出報表區塊
+    # 產出報表區塊 (按鈕推至右下角)
     # ==========================================
-    if st.button("💾 點名結束！產出並下載報表"):
-        df = st.session_state.df
+    # 使用 3 個欄位，把按鈕擠到最右邊的欄位
+    col_empty1, col_empty2, col_btn = st.columns([2, 1, 2])
+    with col_btn:
+        finish_btn = st.button("💾 點名結束！", use_container_width=True)
+
+    # 點擊結束按鈕的運算邏輯
+    if finish_btn:
+        df = st.session_state.df.copy() # 使用備份進行運算，保護原始資料
         date_str = st.session_state.date_str
         
         if not st.session_state.attendees:
-            st.warning("⚠️ 目前沒有任何人簽到！")
+            st.error("⚠️ 目前沒有任何人簽到！")
         elif date_str in df.columns and not df[df[date_str] == 'V'].empty:
-            st.warning(f"⚠️ {date_str} 已經有點名紀錄囉！")
+            st.error(f"⚠️ {date_str} 已經有點名紀錄囉！")
         else:
-            # 將簽到名單去除注音符號，轉換為乾淨姓名
-            clean_attendees = [p.split('(')[0] for p in st.session_state.attendees]
+            # 將簽到名單去除注音，轉換為乾淨姓名
+            clean_attendees = [p.split(' - ')[1] for p in st.session_state.attendees]
             
-            # 補齊新名單
             missing_members = [m for m in CLEAN_ALL_MEMBERS if m not in df['姓名'].values]
             if missing_members:
                 new_rows = pd.DataFrame({"姓名": missing_members})
                 df = pd.concat([df, new_rows], ignore_index=True)
 
-            # 打 V
             if date_str not in df.columns:
                 df[date_str] = ""
             for member in clean_attendees:
                 df.loc[df['姓名'] == member, date_str] = "V"
 
-            # --- Excel 格式整理 ---
             if '編號' in df.columns:
                 df = df.drop(columns=['編號'])
             if '總次數' in df.columns:
@@ -174,28 +186,36 @@ else:
             date_cols = [col for col in df.columns if col != '姓名']
             df['總次數'] = df[date_cols].apply(lambda x: (x == 'V').sum(), axis=1)
 
-            # 加入依序編號
             df.insert(0, '編號', range(1, len(df) + 1))
             final_cols = ['編號', '姓名'] + date_cols + ['總次數']
             df = df[final_cols]
             
-            st.session_state.df = df
-
-            st.success(f"🎉 已成功記錄 {len(clean_attendees)} 人！請下載下方檔案。")
-
+            # 將產出的資料存入暫存 (Session State)
+            st.session_state.final_df = df
+            
             excel_buffer = BytesIO()
             df.to_excel(excel_buffer, index=False)
-            word_bytes = generate_word_report(date_str, clean_attendees)
-
-            dl_col1, dl_col2 = st.columns(2)
-            with dl_col1:
-                st.download_button("📥 下載 Excel 總表", data=excel_buffer.getvalue(), file_name=f"車隊點名總表_{date_str}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            with dl_col2:
-                st.download_button("📥 下載 Word 紀錄檔", data=word_bytes, file_name=f"{date_str}_團騎點名紀錄.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            st.session_state.excel_data = excel_buffer.getvalue()
             
-            st.write("📊 總表預覽：")
-            st.dataframe(df)
+            st.session_state.word_data = generate_word_report(date_str, clean_attendees)
+            
+            # 標記報表已成功產出
+            st.session_state.report_generated = True
 
+    # 無論畫面如何重整，只要報表產出了就會一直顯示下載按鈕
+    if st.session_state.report_generated:
+        st.success(f"🎉 已成功記錄 {len(st.session_state.attendees)} 人！您可以隨時點擊下方按鈕下載檔案。")
+
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            st.download_button("📥 下載 Excel 總表", data=st.session_state.excel_data, file_name=f"車隊點名總表_{st.session_state.date_str}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        with dl_col2:
+            st.download_button("📥 下載 Word 紀錄檔", data=st.session_state.word_data, file_name=f"{st.session_state.date_str}_團騎點名紀錄.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        
+        st.write("📊 總表預覽：")
+        st.dataframe(st.session_state.final_df)
+
+    st.markdown("---")
     if st.button("⚙️ 重新設定日期或表單"):
         st.session_state.setup_complete = False
         st.rerun()
